@@ -108,6 +108,7 @@ erDiagram
 | `GET` | `/documents/{id}/file` | Original uploaded file |
 | `GET` | `/review/queue` | Documents waiting for review |
 | `PATCH` | `/documents/{id}/fields` | Submit corrections as `{"field": value}`. The record is re-validated and needs approval again |
+| `POST` | `/documents/{id}/reprocess` | Retry a `failed` document (e.g. after installing Tesseract) |
 | `POST` | `/documents/{id}/approve` | Approve. Returns `409` if any field is still invalid |
 | `GET` | `/records?doc_type=` | Approved records as flat JSON |
 
@@ -120,7 +121,7 @@ The UI talks to the backend only over the REST API (`API_URL`), so it can run on
 | Page | What you can do |
 |------|-----------------|
 | **Upload** | Upload one or more PDFs/scans, pick the document type, watch processing live, see per-field confidence |
-| **Documents** | Status counts, filter by status, select a document to see its fields, source pages and JSON |
+| **Documents** | Status counts, filter by status, select a document to see its fields, source pages and JSON. Reprocess failed ones |
 | **Review (n)** | Fix flagged fields next to the source page (editable tables for line items), save and approve |
 | **Records** | Browse approved records by type, download as JSON |
 
@@ -136,7 +137,7 @@ Adding a document type means adding one Pydantic model to `SCHEMAS`. The prompt,
 
 ## Quick start
 
-**Prerequisites:** Python 3.11+, [Ollama](https://ollama.com), and [Tesseract](https://github.com/tesseract-ocr/tesseract) (only needed for scanned files).
+**Prerequisites:** Python 3.11+, [Ollama](https://ollama.com), and [Tesseract](https://github.com/tesseract-ocr/tesseract) for scanned files (Windows: `winget install UB-Mannheim.TesseractOCR`).
 
 ```bash
 pip install -r requirements.txt
@@ -161,6 +162,7 @@ curl localhost:8000/documents/1
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server |
 | `CONFIDENCE_THRESHOLD` | `0.85` | Auto-approve cut-off |
 | `DATABASE_URL` | `sqlite:///data/pipeline.db` | Any SQLAlchemy URL, e.g. `postgresql+psycopg://...` |
+| `TESSERACT_CMD` | auto | Path to `tesseract`. Found on PATH or in `C:\Program Files\Tesseract-OCR` otherwise |
 | `API_URL` | `http://localhost:8000` | Backend the Streamlit UI connects to |
 
 ### Tests
