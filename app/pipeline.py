@@ -70,6 +70,7 @@ def update_fields(doc_id: int, corrections: dict[str, Any]) -> Document:
                 f.confidence = 0.0
             elif not errors:
                 f.value = data[f.name]
+        doc.status = "needs_review"  # any edit needs a fresh approval, even on an approved record
         s.commit()
         return doc
 
