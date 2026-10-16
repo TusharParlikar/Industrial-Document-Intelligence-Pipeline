@@ -1,4 +1,4 @@
-"""Human-review UI. Run: streamlit run review/app.py"""
+"""Human-review UI. Run: streamlit run review/streamlit_app.py"""
 import sys
 from pathlib import Path
 

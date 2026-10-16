@@ -48,7 +48,7 @@ flowchart LR
 | 5 | **Validation** | Pydantic models per document type. Errors are mapped back to individual fields | [app/schemas.py](app/schemas.py), [app/scoring.py](app/scoring.py) |
 | 6 | **Scoring** | Confidence per field (see below) | [app/scoring.py](app/scoring.py) |
 | 7 | **Routing** | Every field valid and ≥ threshold → `approved`. Otherwise → `needs_review` | [app/scoring.py](app/scoring.py) |
-| 8 | **Review** | Reviewer edits flagged fields, the record is re-validated, then approved | [review/app.py](review/app.py), [app/pipeline.py](app/pipeline.py) |
+| 8 | **Review** | Reviewer edits flagged fields, the record is re-validated, then approved | [review/streamlit_app.py](review/streamlit_app.py), [app/pipeline.py](app/pipeline.py) |
 | 9 | **Serve** | Approved records are exposed over REST | [app/api.py](app/api.py) |
 
 ### Why LangChain + Ollama
@@ -129,7 +129,7 @@ pip install -r requirements.txt
 ollama pull qwen3:1.7b
 
 uvicorn app.api:app --reload        # API on :8000
-streamlit run review/app.py         # review UI on :8501
+streamlit run review/streamlit_app.py   # review UI on :8501
 ```
 
 Try it with the sample:
@@ -168,7 +168,7 @@ app/
   pipeline.py     # orchestration + reviewer actions
   db.py           # SQLAlchemy models and session
 review/
-  app.py          # Streamlit review UI
+  streamlit_app.py  # Streamlit review UI
 samples/          # example documents
 tests/
 ```
