@@ -9,6 +9,7 @@ THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.85"))
 # A null may mean "not in the document" or "the model missed it". We cannot tell, so a person confirms.
 # ponytail: flat score, check for the field's label in the text if too many docs land in review
 MISSING_SCORE = 0.5
+MISSING = object()  # marker for an empty leaf
 DATE_FORMATS = ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y"]
 
 
@@ -35,7 +36,9 @@ def _leaves(value):
     elif isinstance(value, list):
         for v in value:
             yield from _leaves(v)
-    elif value not in (None, ""):
+    elif value in (None, ""):
+        yield MISSING
+    else:
         yield value
 
 
@@ -54,18 +57,22 @@ def _found(leaf, text: str, numbers: set[float]) -> bool:
 
 
 def grounding(value, text: str) -> float:
-    """Fraction of the value's leaves that appear in the source text. Absent values get MISSING_SCORE."""
-    leaves = list(_leaves(value))
-    if not leaves:
-        return MISSING_SCORE
+    """Score of the value's weakest leaf: 1 if found in the source text, 0 if not, MISSING_SCORE if empty.
+
+    Worst-leaf, not average: one hallucinated quantity in a 20-row BOM must still go to review.
+    """
     norm = _norm(text)
     # ponytail: "1,500.00" style only, European "1.500,00" will not match
-    numbers = {float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
-    return sum(_found(leaf, norm, numbers) for leaf in leaves) / len(leaves)
+    matches = [float(n.replace(",", "")) for n in re.findall(r"-?\d[\d,]*(?:\.\d+)?", text)]
+    numbers = set(matches) | {abs(n) for n in matches}  # "-20 C" is -20, but "PO-4471" is 4471
+    scores = [MISSING_SCORE if leaf is MISSING else float(_found(leaf, norm, numbers)) for leaf in _leaves(value)]
+    return min(scores, default=MISSING_SCORE)
 
 
 def score_fields(data: dict, text: str, source_quality: float, schema: type[BaseModel]) -> list[dict]:
     errors = validation_errors(schema, data)
+    if not errors:  # fill keys the model left out, so they count as missing instead of vanishing
+        data = schema.model_validate(data).model_dump(mode="json")
     fields = []
     for name in schema.model_fields:
         value = data.get(name)

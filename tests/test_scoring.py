@@ -24,7 +24,10 @@ def test_grounding():
     assert grounding("2026-03-14", TEXT) == 1.0     # ISO vs 03/14/2026
     assert grounding(None, TEXT) == MISSING_SCORE   # unverifiable, a person confirms
     assert grounding("PO-9999", TEXT) == 0.0        # hallucinated
-    assert grounding([{"a": "HX-200", "b": 99}], TEXT) == 0.5
+    assert grounding([{"a": "HX-200", "b": 99}], TEXT) == 0.0      # one bad leaf sinks the field
+    assert grounding([{"a": "HX-200", "b": None}], TEXT) == MISSING_SCORE
+    assert grounding(-20, "Operating temperature: -20 C to 180 C") == 1.0
+    assert grounding(4471, TEXT) == 1.0             # "PO-4471" is not -4471
 
 
 def test_clean_document_auto_approves():
@@ -54,3 +57,9 @@ def test_cross_field_rule():
 
 def test_missing_value_goes_to_review():
     assert route(score_fields({**GOOD, "currency": None}, TEXT, 1.0, OrderForm)) == "needs_review"
+
+
+def test_dropped_nested_key_goes_to_review():
+    item = {k: v for k, v in GOOD["line_items"][0].items() if k != "description"}
+    fields = {f["name"]: f for f in score_fields({**GOOD, "line_items": [item]}, TEXT, 1.0, OrderForm)}
+    assert fields["line_items"]["confidence"] == MISSING_SCORE
