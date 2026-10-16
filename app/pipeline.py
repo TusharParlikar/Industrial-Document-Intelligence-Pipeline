@@ -30,6 +30,19 @@ def process(doc_id: int) -> None:
         s.commit()
 
 
+def reset_for_reprocess(doc_id: int) -> Document:
+    """Clear a failed document so process() can run again."""
+    with Session() as s:
+        doc = s.get(Document, doc_id)
+        if doc is None:
+            raise LookupError(f"document {doc_id} not found")
+        if doc.status != "failed":
+            raise ValueError(f"only failed documents can be reprocessed, this one is {doc.status}")
+        doc.status, doc.error, doc.fields = "received", None, []
+        s.commit()
+        return doc
+
+
 def list_documents(status: str | None = None, doc_type: str | None = None) -> list[Document]:
     query = select(Document).order_by(Document.id)
     if status:

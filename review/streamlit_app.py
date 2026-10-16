@@ -127,6 +127,12 @@ def documents_page():
     st.subheader(f"#{doc['id']} {doc['filename']}")
     if doc["error"]:
         st.error(doc["error"])
+    if doc["status"] == "failed" and st.button("Reprocess", icon=":material/refresh:"):
+        try:
+            api("POST", f"/documents/{doc['id']}/reprocess")
+            st.toast(f"#{doc['id']} queued again, refresh in a few seconds", icon="⏳")
+        except ApiError as e:
+            st.error(str(e))
     left, right = st.columns([2, 3])
     with right:
         fields_table(doc, THRESHOLD)

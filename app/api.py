@@ -60,6 +60,18 @@ def document_file(doc_id: int):
     return FileResponse(doc.path, filename=doc.filename)
 
 
+@app.post("/documents/{doc_id}/reprocess", status_code=202)
+def reprocess(doc_id: int, background: BackgroundTasks):
+    try:
+        doc = pipeline.reset_for_reprocess(doc_id)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    background.add_task(pipeline.process, doc.id)
+    return {"id": doc.id, "status": doc.status}
+
+
 @app.get("/review/queue")
 def review_queue():
     return [d.to_dict() for d in pipeline.list_documents(status="needs_review")]
