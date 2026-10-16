@@ -36,3 +36,36 @@ def get_document(doc_id: int):
     if doc is None:
         raise HTTPException(404, "document not found")
     return doc.to_dict()
+
+
+@app.get("/review/queue")
+def review_queue():
+    return [d.to_dict() for d in pipeline.list_documents(status="needs_review")]
+
+
+@app.patch("/documents/{doc_id}/fields")
+def update_fields(doc_id: int, corrections: dict[str, Any]):
+    try:
+        return pipeline.update_fields(doc_id, corrections).to_dict()
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.post("/documents/{doc_id}/approve")
+def approve(doc_id: int):
+    try:
+        return pipeline.approve(doc_id).to_dict()
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.get("/records")
+def records(doc_type: DocType | None = None):
+    return [
+        {"id": d.id, "doc_type": d.doc_type, "filename": d.filename, "data": {f.name: f.value for f in d.fields}}
+        for d in pipeline.list_documents(status="approved", doc_type=doc_type)
+    ]
