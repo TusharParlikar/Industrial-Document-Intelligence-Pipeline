@@ -3,16 +3,30 @@ import uuid
 from typing import Any, Literal
 
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from app import pipeline
 from app.db import DATA_DIR, Document, Session
+from app.llm import MODEL
+from app.scoring import THRESHOLD
 
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 ALLOWED = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 DocType = Literal["order_form", "technical_data_sheet", "bill_of_materials"]
+Status = Literal["received", "needs_review", "approved", "failed"]
 
 app = FastAPI(title="Industrial Document Intelligence Pipeline")
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model": MODEL, "threshold": THRESHOLD}
+
+
+@app.get("/documents")
+def list_documents(status: Status | None = None, doc_type: DocType | None = None):
+    return [d.to_dict() for d in pipeline.list_documents(status=status, doc_type=doc_type)]
 
 
 @app.post("/documents", status_code=202)
@@ -36,6 +50,14 @@ def get_document(doc_id: int):
     if doc is None:
         raise HTTPException(404, "document not found")
     return doc.to_dict()
+
+
+@app.get("/documents/{doc_id}/file")
+def document_file(doc_id: int):
+    doc = pipeline.get_document(doc_id)
+    if doc is None:
+        raise HTTPException(404, "document not found")
+    return FileResponse(doc.path, filename=doc.filename)
 
 
 @app.get("/review/queue")
