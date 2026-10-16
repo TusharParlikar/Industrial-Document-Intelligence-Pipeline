@@ -1,5 +1,5 @@
 from app.schemas import OrderForm, TechnicalDataSheet
-from app.scoring import grounding, route, score_fields, validation_errors
+from app.scoring import MISSING_SCORE, grounding, route, score_fields, validation_errors
 
 TEXT = """PURCHASE ORDER  PO-4471
 Date: 03/14/2026
@@ -22,7 +22,7 @@ def test_grounding():
     assert grounding("PO-4471", TEXT) == 1.0
     assert grounding(15000.0, TEXT) == 1.0          # "15,000.00" in text
     assert grounding("2026-03-14", TEXT) == 1.0     # ISO vs 03/14/2026
-    assert grounding(None, TEXT) == 1.0             # absent value is not a hallucination
+    assert grounding(None, TEXT) == MISSING_SCORE   # unverifiable, a person confirms
     assert grounding("PO-9999", TEXT) == 0.0        # hallucinated
     assert grounding([{"a": "HX-200", "b": 99}], TEXT) == 0.5
 
@@ -51,3 +51,6 @@ def test_cross_field_rule():
     })
     assert set(errors) == {"operating_temp_max_c"}
 
+
+def test_missing_value_goes_to_review():
+    assert route(score_fields({**GOOD, "currency": None}, TEXT, 1.0, OrderForm)) == "needs_review"
