@@ -1,4 +1,8 @@
 """Text extraction: PDF text layer when present, Tesseract OCR otherwise."""
+import os
+import shutil
+from pathlib import Path
+
 import pymupdf
 
 MIN_CHARS = 20  # fewer characters than this on a page = treat it as a scan
@@ -29,6 +33,8 @@ def _ocr(page: pymupdf.Page) -> tuple[str, float]:
     import pytesseract
     from PIL import Image, ImageOps
 
+    pytesseract.pytesseract.tesseract_cmd = _tesseract_cmd()
+
     pix = page.get_pixmap(dpi=300, colorspace=pymupdf.csGRAY)
     # ponytail: autocontrast only, add deskew/denoise when real scans need it
     img = ImageOps.autocontrast(Image.frombytes("L", (pix.width, pix.height), pix.samples))
@@ -44,3 +50,9 @@ def _ocr(page: pymupdf.Page) -> tuple[str, float]:
             confs.append(conf)
     text = "\n".join(" ".join(words) for words in lines.values())
     return text, sum(confs) / len(confs) / 100 if confs else 0.0
+
+
+def _tesseract_cmd() -> str:
+    """TESSERACT_CMD, else PATH, else the Windows installer's default folder (it does not touch PATH)."""
+    default = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Tesseract-OCR" / "tesseract.exe"
+    return os.getenv("TESSERACT_CMD") or shutil.which("tesseract") or (str(default) if default.exists() else "tesseract")
