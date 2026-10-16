@@ -14,7 +14,7 @@ Product and order data in manufacturing still arrives as PDFs and scans that som
 - **LLM field extraction with LangChain** (`ChatOllama`, runs locally), constrained to a strict JSON schema
 - **Pydantic validation**: types, ranges, required fields, cross-field rules
 - **Per-field confidence scoring** with a configurable auto-approve threshold
-- **Human-review UI** (Streamlit) showing the source page next to the extracted fields
+- **Streamlit front end** for the whole backend: upload, track documents, review flagged fields next to the source page, browse and export approved records
 - **REST API + database** for approved records, ready for downstream systems
 - Full **audit trail**: every field records whether its value came from the LLM or a person
 
@@ -102,13 +102,27 @@ erDiagram
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/documents` | Upload a file (`file`, `doc_type` form fields). Processing runs in the background |
+| `GET` | `/health` | Backend status, model and threshold |
+| `GET` | `/documents?status=&doc_type=` | List documents |
 | `GET` | `/documents/{id}` | Status and extracted fields |
+| `GET` | `/documents/{id}/file` | Original uploaded file |
 | `GET` | `/review/queue` | Documents waiting for review |
 | `PATCH` | `/documents/{id}/fields` | Submit corrections as `{"field": value}`. The record is re-validated and needs approval again |
 | `POST` | `/documents/{id}/approve` | Approve. Returns `409` if any field is still invalid |
 | `GET` | `/records?doc_type=` | Approved records as flat JSON |
 
 Interactive docs at `http://localhost:8000/docs`.
+
+### Streamlit UI
+
+The UI talks to the backend only over the REST API (`API_URL`), so it can run on another machine.
+
+| Page | What you can do |
+|------|-----------------|
+| **Upload** | Upload one or more PDFs/scans, pick the document type, watch processing live, see per-field confidence |
+| **Documents** | Status counts, filter by status, select a document to see its fields, source pages and JSON |
+| **Review (n)** | Fix flagged fields next to the source page (editable tables for line items), save and approve |
+| **Records** | Browse approved records by type, download as JSON |
 
 ### Supported document types
 
@@ -129,7 +143,7 @@ pip install -r requirements.txt
 ollama pull qwen3:1.7b
 
 uvicorn app.api:app --reload        # API on :8000
-streamlit run review/streamlit_app.py   # review UI on :8501
+streamlit run review/streamlit_app.py   # UI on :8501
 ```
 
 Try it with the sample:
@@ -147,6 +161,7 @@ curl localhost:8000/documents/1
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server |
 | `CONFIDENCE_THRESHOLD` | `0.85` | Auto-approve cut-off |
 | `DATABASE_URL` | `sqlite:///data/pipeline.db` | Any SQLAlchemy URL, e.g. `postgresql+psycopg://...` |
+| `API_URL` | `http://localhost:8000` | Backend the Streamlit UI connects to |
 
 ### Tests
 
@@ -168,7 +183,7 @@ app/
   pipeline.py     # orchestration + reviewer actions
   db.py           # SQLAlchemy models and session
 review/
-  streamlit_app.py  # Streamlit review UI
+  streamlit_app.py  # Streamlit UI: upload, documents, review, records
 samples/          # example documents
 tests/
 ```
@@ -183,7 +198,7 @@ tests/
 | Validation | Pydantic |
 | API | FastAPI |
 | Persistence | SQLAlchemy, SQLite (dev) / PostgreSQL (prod) |
-| Review UI | Streamlit |
+| UI | Streamlit (over the REST API) |
 | Tooling | pytest, Git / GitHub |
 
 ## Roadmap
@@ -192,7 +207,7 @@ tests/
 - [x] OCR path for scanned documents
 - [x] LangChain LLM extraction with Pydantic schemas
 - [x] Confidence scoring and routing
-- [x] Streamlit review UI
+- [x] Streamlit UI for upload, tracking, review and records
 - [x] REST API for approved records
 - [ ] Automatic document-type classification (LLM)
 - [ ] Chunking for long multi-page documents
