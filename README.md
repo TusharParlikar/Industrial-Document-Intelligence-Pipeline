@@ -120,6 +120,42 @@ Interactive docs at `http://localhost:8000/docs`.
 
 Adding a document type means adding one Pydantic model to `SCHEMAS`. The prompt, scoring and UI pick it up automatically.
 
+## Quick start
+
+**Prerequisites:** Python 3.11+, [Ollama](https://ollama.com), and [Tesseract](https://github.com/tesseract-ocr/tesseract) (only needed for scanned files).
+
+```bash
+pip install -r requirements.txt
+ollama pull qwen3:1.7b
+
+uvicorn app.api:app --reload        # API on :8000
+streamlit run review/app.py         # review UI on :8501
+```
+
+Try it with the sample:
+
+```bash
+curl -F file=@samples/purchase_order.pdf -F doc_type=order_form localhost:8000/documents
+curl localhost:8000/documents/1
+```
+
+### Configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OLLAMA_MODEL` | `qwen3:1.7b` | Any Ollama model. Bigger models miss fewer fields |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server |
+| `CONFIDENCE_THRESHOLD` | `0.85` | Auto-approve cut-off |
+| `DATABASE_URL` | `sqlite:///data/pipeline.db` | Any SQLAlchemy URL, e.g. `postgresql+psycopg://...` |
+
+### Tests
+
+```bash
+python -m pytest -q
+```
+
+The tests cover grounding, routing, hallucination detection and cross-field validation, with no LLM needed.
+
 ## Project layout
 
 ```
