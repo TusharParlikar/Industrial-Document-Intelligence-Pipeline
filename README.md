@@ -64,8 +64,8 @@ confidence = source_quality × grounding        (0 if the field fails validation
 ```
 
 - **Source quality**: 1.0 for digital text, the mean Tesseract word confidence for OCR'd pages
-- **Grounding**: fraction of the value's leaves that actually appear in the source text. Numbers match across formatting (`1,250.00` = `1250`), and ISO dates match common written formats (`03/14/2026`)
-- **Missing values** score `0.5`: a `null` may be correct, or the model may have missed it, so a person confirms
+- **Grounding**: the score of the field's *weakest* value. A value found in the source text scores 1, a value not found scores 0. Numbers match across formatting (`1,250.00` = `1250`, `-20`), and ISO dates match common written formats (`03/14/2026`). Using the weakest value, not the average, means one hallucinated quantity in a 20-row BOM still goes to review
+- **Missing values** score `0.5`: a `null` may be correct, or the model may have missed it, so a person confirms. Keys the model leaves out of nested rows count as missing too
 
 A document auto-approves only when **every** field scores at or above `CONFIDENCE_THRESHOLD` (default `0.85`). A hallucinated value has grounding 0 and always goes to review.
 
@@ -104,7 +104,7 @@ erDiagram
 | `POST` | `/documents` | Upload a file (`file`, `doc_type` form fields). Processing runs in the background |
 | `GET` | `/documents/{id}` | Status and extracted fields |
 | `GET` | `/review/queue` | Documents waiting for review |
-| `PATCH` | `/documents/{id}/fields` | Submit corrections as `{"field": value}`. The record is re-validated |
+| `PATCH` | `/documents/{id}/fields` | Submit corrections as `{"field": value}`. The record is re-validated and needs approval again |
 | `POST` | `/documents/{id}/approve` | Approve. Returns `409` if any field is still invalid |
 | `GET` | `/records?doc_type=` | Approved records as flat JSON |
 
