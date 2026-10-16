@@ -2,7 +2,7 @@
 
 An end-to-end pipeline that turns messy industrial documents (order forms, technical data sheets, bills of materials) into clean, validated, structured data, with a human in the loop only where the model is unsure.
 
-> **Status:** architecture and design stage. Implementation is in progress.
+> **Status:** working MVP. Ingest, extraction, LangChain + Ollama field extraction, validation, confidence scoring, review UI and REST API all run end to end. Docker and the automation hook are next.
 
 ## Why
 
@@ -10,56 +10,64 @@ Product and order data in manufacturing still arrives as PDFs and scans that som
 
 ## Key features
 
-- Handles both **digital and scanned PDFs** (OCR fallback for scans)
-- **LLM-based field extraction** into a strict JSON schema (local models via Ollama)
+- Handles both **digital and scanned PDFs** (plus PNG/JPG/TIFF), with Tesseract OCR as the fallback for scans
+- **LLM field extraction with LangChain** (`ChatOllama`, runs locally), constrained to a strict JSON schema
 - **Pydantic validation**: types, ranges, required fields, cross-field rules
 - **Per-field confidence scoring** with a configurable auto-approve threshold
-- **Human-review UI** (Streamlit) for low-confidence or invalid fields
+- **Human-review UI** (Streamlit) showing the source page next to the extracted fields
 - **REST API + database** for approved records, ready for downstream systems
-- Optional **automation hook** (Power Automate / UiPath)
+- Full **audit trail**: every field records whether its value came from the LLM or a person
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    U[Upload<br/>PDF / scan] --> API[FastAPI<br/>ingest endpoint]
+    U[Upload<br/>PDF / scan] --> API[FastAPI<br/>POST /documents]
     API --> D{Has text layer?}
-    D -- yes --> T[PyMuPDF / pdfplumber<br/>text + tables]
-    D -- no --> O[pdf2image + Pillow<br/>preprocess] --> OCR[Tesseract OCR]
-    T --> X[LLM extraction<br/>Ollama → JSON]
+    D -- yes --> T[PyMuPDF<br/>text layer]
+    D -- no --> O[PyMuPDF render<br/>+ Pillow] --> OCR[Tesseract OCR]
+    T --> X[LangChain<br/>prompt → ChatOllama → JSON]
     OCR --> X
     X --> V[Pydantic validation]
-    V --> C{Confidence ≥ threshold<br/>and valid?}
+    V --> C{Every field ≥ threshold<br/>and valid?}
     C -- yes --> DB[(SQLite / PostgreSQL)]
     C -- no --> R[Streamlit<br/>review UI]
     R -- corrected + approved --> DB
-    DB --> REST[REST API<br/>/records]
+    DB --> REST[GET /records]
     REST --> EXT[ERP / Power Automate / UiPath]
 ```
 
 ### Pipeline stages
 
-| # | Stage | Responsibility | Tools |
-|---|-------|----------------|-------|
-| 1 | **Ingest** | Accept upload, store the original file, create a `document` row with status `received` | FastAPI |
-| 2 | **Text extraction** | Detect text layer per page. Digital pages are parsed directly, scanned pages go to OCR | PyMuPDF, pdfplumber |
-| 3 | **OCR** | Rasterize, deskew/denoise/binarize, OCR. Keeps Tesseract word confidences | pdf2image, Pillow, pytesseract |
-| 4 | **Extraction** | Prompt the LLM with the document text and the target schema. JSON-only output, retried on parse failure | Ollama |
-| 5 | **Validation** | Parse into Pydantic models. Type, range, required-field and cross-field checks. Errors are attached per field | Pydantic |
-| 6 | **Scoring** | Compute a confidence score per field (see below) | Python |
-| 7 | **Routing** | All fields valid and ≥ threshold → `approved`. Otherwise → `needs_review` | Python |
-| 8 | **Review** | Reviewer sees the source page next to the extracted fields, edits flagged fields and approves | Streamlit |
-| 9 | **Serve** | Approved records are exposed over REST and can trigger a webhook | FastAPI, SQLAlchemy |
+| # | Stage | Responsibility | Code |
+|---|-------|----------------|------|
+| 1 | **Ingest** | Accept upload, store it under a random name, create a `document` row with status `received` | [app/api.py](app/api.py) |
+| 2 | **Text extraction** | Pages with a text layer are read directly. Pages with almost no text are treated as scans | [app/extract.py](app/extract.py) |
+| 3 | **OCR** | Render at 300 DPI in grayscale, autocontrast, run Tesseract. Keeps word confidences | [app/extract.py](app/extract.py) |
+| 4 | **Extraction** | LangChain chain `ChatPromptTemplate \| ChatOllama(format=schema) \| JsonOutputParser`, retried up to 3 times | [app/llm.py](app/llm.py) |
+| 5 | **Validation** | Pydantic models per document type. Errors are mapped back to individual fields | [app/schemas.py](app/schemas.py), [app/scoring.py](app/scoring.py) |
+| 6 | **Scoring** | Confidence per field (see below) | [app/scoring.py](app/scoring.py) |
+| 7 | **Routing** | Every field valid and ≥ threshold → `approved`. Otherwise → `needs_review` | [app/scoring.py](app/scoring.py) |
+| 8 | **Review** | Reviewer edits flagged fields, the record is re-validated, then approved | [review/app.py](review/app.py), [app/pipeline.py](app/pipeline.py) |
+| 9 | **Serve** | Approved records are exposed over REST | [app/api.py](app/api.py) |
+
+### Why LangChain + Ollama
+
+The LLM call goes through LangChain, so the model is swappable (`ChatOllama` → any LangChain chat model) without touching the pipeline. Ollama's `format` option takes the Pydantic JSON schema, so the model can only produce output with the right shape. The raw dict goes through validation as a separate step, so a bad value flags one field instead of failing the whole document.
 
 ### Confidence scoring
 
-Each field gets a score in `[0, 1]` that combines:
+Each field gets a score in `[0, 1]`:
 
-- **Source quality**: average OCR word confidence for the span the value came from (1.0 for digital text)
-- **Grounding**: whether the extracted value actually appears in the source text (exact or fuzzy match)
-- **Validation**: 0 if the field failed Pydantic validation
+```
+confidence = source_quality × grounding        (0 if the field fails validation)
+```
 
-A field auto-approves when its score is at or above `CONFIDENCE_THRESHOLD` (default `0.85`). A document auto-approves only when **every** required field does.
+- **Source quality**: 1.0 for digital text, the mean Tesseract word confidence for OCR'd pages
+- **Grounding**: fraction of the value's leaves that actually appear in the source text. Numbers match across formatting (`1,250.00` = `1250`), and ISO dates match common written formats (`03/14/2026`)
+- **Missing values** score `0.5`: a `null` may be correct, or the model may have missed it, so a person confirms
+
+A document auto-approves only when **every** field scores at or above `CONFIDENCE_THRESHOLD` (default `0.85`). A hallucinated value has grounding 0 and always goes to review.
 
 ### Data model
 
@@ -69,79 +77,91 @@ erDiagram
     DOCUMENT {
         int id
         string filename
+        string path
         string doc_type
         string status
+        string error
         datetime created_at
     }
     FIELD {
         int id
         int document_id
         string name
-        string value
+        json value
         float confidence
+        string error
         string source
         bool reviewed
     }
 ```
 
-`DOCUMENT.status` moves through `received → extracted → needs_review | approved`. `FIELD.source` is `llm` or `human`, so every correction leaves an audit trail.
+`DOCUMENT.status` goes `received → needs_review | approved | failed`. `FIELD.source` is `llm` or `human`.
 
 ### REST API
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/documents` | Upload a PDF or image and start the pipeline |
+| `POST` | `/documents` | Upload a file (`file`, `doc_type` form fields). Processing runs in the background |
 | `GET` | `/documents/{id}` | Status and extracted fields |
 | `GET` | `/review/queue` | Documents waiting for review |
-| `PATCH` | `/documents/{id}/fields` | Submit reviewer corrections |
-| `POST` | `/documents/{id}/approve` | Approve a reviewed document |
-| `GET` | `/records` | Approved records, filterable by `doc_type` |
+| `PATCH` | `/documents/{id}/fields` | Submit corrections as `{"field": value}`. The record is re-validated |
+| `POST` | `/documents/{id}/approve` | Approve. Returns `409` if any field is still invalid |
+| `GET` | `/records?doc_type=` | Approved records as flat JSON |
+
+Interactive docs at `http://localhost:8000/docs`.
 
 ### Supported document types
 
-Each type is one Pydantic schema: `OrderForm`, `TechnicalDataSheet`, `BillOfMaterials`. Adding a document type means adding one schema and one prompt template. The pipeline stays the same.
+| `doc_type` | Schema | Key fields |
+|------------|--------|------------|
+| `order_form` | `OrderForm` | order number, date, customer, line items, total, currency |
+| `technical_data_sheet` | `TechnicalDataSheet` | product, model number, material, temperature range, max pressure, weight |
+| `bill_of_materials` | `BillOfMaterials` | assembly, part number, revision, items |
+
+Adding a document type means adding one Pydantic model to `SCHEMAS`. The prompt, scoring and UI pick it up automatically.
+
+## Project layout
+
+```
+app/
+  api.py          # FastAPI routes
+  extract.py      # PDF text layer + Tesseract OCR
+  llm.py          # LangChain + Ollama extraction chain
+  schemas.py      # Pydantic models per document type
+  scoring.py      # validation, confidence, routing
+  pipeline.py     # orchestration + reviewer actions
+  db.py           # SQLAlchemy models and session
+review/
+  app.py          # Streamlit review UI
+samples/          # example documents
+tests/
+```
 
 ## Tech stack
 
 | Area | Choice |
 |------|--------|
 | Language | Python |
-| PDF parsing | PyMuPDF, pdfplumber |
-| OCR | Tesseract via pytesseract, pdf2image, Pillow |
-| Extraction | LLM via Ollama, prompt-based JSON output |
+| PDF + OCR | PyMuPDF, Tesseract (pytesseract), Pillow |
+| LLM | LangChain (`langchain-ollama`) with local Ollama models |
 | Validation | Pydantic |
 | API | FastAPI |
 | Persistence | SQLAlchemy, SQLite (dev) / PostgreSQL (prod) |
 | Review UI | Streamlit |
-| Automation | Power Automate / UiPath (optional) |
-| Tooling | pytest, Docker, Git / GitHub |
-
-## Planned project layout
-
-```
-app/
-  api.py          # FastAPI routes
-  extract.py      # PDF text + OCR
-  llm.py          # Ollama prompts and JSON parsing
-  schemas.py      # Pydantic models per document type
-  scoring.py      # confidence + routing
-  db.py           # SQLAlchemy models and session
-review/
-  app.py          # Streamlit review UI
-tests/
-docker-compose.yml
-```
+| Tooling | pytest, Git / GitHub |
 
 ## Roadmap
 
-- [ ] Ingest + digital PDF extraction
-- [ ] OCR path for scanned documents
-- [ ] LLM extraction with Pydantic schemas
-- [ ] Confidence scoring and routing
-- [ ] Streamlit review UI
-- [ ] REST API for approved records
+- [x] Ingest + digital PDF extraction
+- [x] OCR path for scanned documents
+- [x] LangChain LLM extraction with Pydantic schemas
+- [x] Confidence scoring and routing
+- [x] Streamlit review UI
+- [x] REST API for approved records
+- [ ] Automatic document-type classification (LLM)
+- [ ] Chunking for long multi-page documents
 - [ ] Docker Compose setup (API, UI, Postgres, Ollama)
-- [ ] Power Automate / UiPath webhook
+- [ ] Power Automate / UiPath webhook on approval
 
 ## Author
 
