@@ -40,7 +40,22 @@ class TechnicalDataSheet(BaseModel):
         return v
 
 
+class BOMItem(BaseModel):
+    part_number: str
+    description: str | None = None
+    quantity: float = Field(gt=0)
+    unit: str | None = None
+
+
+class BillOfMaterials(BaseModel):
+    assembly_name: str
+    assembly_part_number: str
+    revision: str | None = None
+    items: list[BOMItem] = Field(min_length=1)
+
+
 SCHEMAS: dict[str, type[BaseModel]] = {
     "order_form": OrderForm,
     "technical_data_sheet": TechnicalDataSheet,
+    "bill_of_materials": BillOfMaterials,
 }
