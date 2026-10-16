@@ -6,6 +6,9 @@ from datetime import date
 from pydantic import BaseModel, ValidationError
 
 THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.85"))
+# A null may mean "not in the document" or "the model missed it". We cannot tell, so a person confirms.
+# ponytail: flat score, check for the field's label in the text if too many docs land in review
+MISSING_SCORE = 0.5
 DATE_FORMATS = ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y"]
 
 
@@ -51,10 +54,10 @@ def _found(leaf, text: str, numbers: set[float]) -> bool:
 
 
 def grounding(value, text: str) -> float:
-    """Fraction of the value's leaves that appear in the source text. Absent values count as grounded."""
+    """Fraction of the value's leaves that appear in the source text. Absent values get MISSING_SCORE."""
     leaves = list(_leaves(value))
     if not leaves:
-        return 1.0
+        return MISSING_SCORE
     norm = _norm(text)
     # ponytail: "1,500.00" style only, European "1.500,00" will not match
     numbers = {float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
